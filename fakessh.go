@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	logPath = "/app/fakessh.log"
-	errLogPath = "/app/wrong.log"
+	logPath = "/log/fakessh.log"
+	errLogPath = "/log/wrong.log"
 	maxLogEntries = 1000
 )
 
@@ -42,9 +42,18 @@ var (
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
+	// Ensure the /app directory exists.
+	if _, err := os.Stat("/app"); os.IsNotExist(err) {
+		err = os.Mkdir("/app", 0755)
+		if err != nil {
+			fmt.Printf("Failed to create the /app directory: %v", err)
+			return
+		}
+	}
+
 	errLogFile, err := os.OpenFile(errLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Fatalf("Failed to open the error log file: %v", err)
+		fmt.Printf("Failed to open the error log file: %v", err) // Use fmt instead of log here.
 		return
 	}
 	defer errLogFile.Close()
@@ -59,13 +68,13 @@ func main() {
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		errLogger.Printf("Failed to generate private key: %v", err) // Use the error logger here.
+		errLogger.Printf("Failed to generate private key: %v", err) 
 		return
 	}
 
 	signer, err := ssh.NewSignerFromSigner(privateKey)
 	if err != nil {
-		errLogger.Printf("Failed to create signer: %v", err) // And here.
+		errLogger.Printf("Failed to create signer: %v", err) 
 		return
 	}
 
@@ -87,6 +96,7 @@ func main() {
 		go handleConn(conn, serverConfig)
 	}
 }
+
 
 func passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 	entry := fmt.Sprintf("%s %s %s %s\n", conn.RemoteAddr(), string(conn.ClientVersion()), conn.User(), string(password))
