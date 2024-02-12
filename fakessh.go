@@ -8,9 +8,19 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 	"time"
 
+	"bufio"
+	"io"
+
 	"golang.org/x/crypto/ssh"
+)
+
+const (
+	logPath = "/var/log/fakessh.log"
+	errLogPath = "/var/log/wrong.log"
+	maxLogEntries = 1000
 )
 
 var (
@@ -25,21 +35,21 @@ var (
 		"SSH-2.0-OpenSSH_8.4p1 Debian-5+deb11u1",
 		"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6",
 	}
+	logMutex sync.Mutex // A mutex to protect concurrent writes to the log file.
+	errLogger *log.Logger // Logger for error messages
 )
 
 func main() {
-	if len(os.Args) > 1 {
-		logPath := fmt.Sprintf("%s/fakessh-%s.log", os.Args[1], time.Now().Format("2006-01-02-15-04-05-000"))
-		logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
-			log.Println("Failed to open log file:", logPath, err)
-			return
-		}
-		defer logFile.Close()
-		log.SetOutput(logFile)
-	}
-
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
+	errLogFile, err := os.OpenFile(errLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Failed to open the error log file: %v", err)
+		return
+	}
+	defer errLogFile.Close()
+
+	errLogger = log.New(errLogFile, "", log.LstdFlags | log.Lmicroseconds)
 
 	serverConfig := &ssh.ServerConfig{
 		MaxAuthTries:     6,
@@ -47,13 +57,23 @@ func main() {
 		ServerVersion:    serverVersions[0],
 	}
 
-	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	signer, _ := ssh.NewSignerFromSigner(privateKey)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		errLogger.Printf("Failed to generate private key: %v", err) // Use the error logger here.
+		return
+	}
+
+	signer, err := ssh.NewSignerFromSigner(privateKey)
+	if err != nil {
+		errLogger.Printf("Failed to create signer: %v", err) // And here.
+		return
+	}
+
 	serverConfig.AddHostKey(signer)
 
 	listener, err := net.Listen("tcp", ":22")
 	if err != nil {
-		log.Println("Failed to listen:", err)
+		errLogger.Println("Failed to listen:", err)
 		return
 	}
 	defer listener.Close()
@@ -61,7 +81,7 @@ func main() {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Println("Failed to accept:", err)
+			errLogger.Println("Failed to accept:", err)
 			break
 		}
 		go handleConn(conn, serverConfig)
@@ -69,9 +89,58 @@ func main() {
 }
 
 func passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-	log.Println(conn.RemoteAddr(), string(conn.ClientVersion()), conn.User(), string(password))
+	entry := fmt.Sprintf("%s %s %s %s\n", conn.RemoteAddr(), string(conn.ClientVersion()), conn.User(), string(password))
+	
+	lines, err := readLastLines(logPath, maxLogEntries - 1)
+	if err != nil && !os.IsNotExist(err) {
+		errLogger.Println("Failed to read log file:", err)
+		return nil, errBadPassword
+	}
+
+	logMutex.Lock()
+	defer logMutex.Unlock()
+
+	file, err := os.Create(logPath)
+	if err != nil {
+		errLogger.Println("Failed to open log file:", err)
+		return nil, errBadPassword
+	}
+	defer file.Close()
+
+	for _, line := range lines {
+		_, _ = file.WriteString(line + "\n")
+	}
+	_, _ = file.WriteString(entry)
+
 	time.Sleep(100 * time.Millisecond)
 	return nil, errBadPassword
+}
+
+func readLastLines(path string, n int) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lines := make([]string, 0, n)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(lines) < n {
+			lines = append(lines, line)
+		} else {
+			copy(lines, lines[1:])
+			lines[n-1] = line
+		}
+	}
+
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	return lines, nil
 }
 
 func handleConn(conn net.Conn, serverConfig *ssh.ServerConfig) {
