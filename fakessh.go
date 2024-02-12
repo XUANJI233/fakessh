@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	logPath = "/log/fakessh.log"
-	errLogPath = "/log/wrong.log"
+	logPath = "/tmp/fakessh.log"
+	errLogPath = "/tmp/wrong.log"
 	maxLogEntries = 1000
 )
 
@@ -41,15 +41,6 @@ var (
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-
-	// Ensure the /app directory exists.
-	if _, err := os.Stat("/app"); os.IsNotExist(err) {
-		err = os.Mkdir("/app", 0755)
-		if err != nil {
-			fmt.Printf("Failed to create the /app directory: %v", err)
-			return
-		}
-	}
 
 	errLogFile, err := os.OpenFile(errLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
