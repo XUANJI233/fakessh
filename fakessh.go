@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	logPath = "/var/log/fakessh.log"
-	errLogPath = "/var/log/wrong.log"
+	logPath = "/app/fakessh.log"
+	errLogPath = "/app/wrong.log"
 	maxLogEntries = 1000
 )
 
