@@ -3,25 +3,30 @@ FROM golang:1.19-alpine AS builder
 
 WORKDIR /app
 
-# 1. 复制 go.mod (如果本地有 go.sum 也要复制，没有也没关系)
+# 1. 先复制依赖定义文件
 COPY go.mod ./
 
-# --- 新增这一行 ---
-# 自动下载并生成 go.sum，解决 checksum 报错
-RUN go mod tidy
-# -----------------
+# 2. 复制源代码
+COPY main.go .
 
-# 下载依赖
+# 3. 缺包并自动下载
+RUN go mod tidy
+
+# 4. 再次确保下载完成
 RUN go mod download
 
-COPY main.go .
-# 静态编译
+# 5. 静态编译
 RUN CGO_ENABLED=0 GOOS=linux go build -o honeypot .
 
-FROM scratch
+# 运行阶段
+FROM alpine:latest
 
-# Create the /tmp directory in the final image.
-COPY --from=builder /tmp /tmp
-COPY --from=builder /app/fakessh /fakessh
-EXPOSE 2222
-ENTRYPOINT ["/fakessh"]
+WORKDIR /app
+# 创建日志目录
+RUN mkdir /logs
+
+# 从编译阶段复制二进制文件
+COPY --from=builder /app/honeypot .
+
+# 运行
+CMD ["./honeypot"]
