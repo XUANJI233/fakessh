@@ -1,7 +1,5 @@
-module github.com/fffaraz/fakessh
+module honeypot
 
-go 1.21
+go 1.19
 
-require golang.org/x/crypto v0.18.0
-
-require golang.org/x/sys v0.16.0 // indirect
+require gopkg.in/natefinch/lumberjack.v2 v2.2.1
